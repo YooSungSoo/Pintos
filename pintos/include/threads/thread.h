@@ -91,7 +91,7 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-
+	int64_t wakeup_tick;				/** project1-Alarm Clock */
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
@@ -142,5 +142,17 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+/** project1-Alarm Clock */
+void thread_sleep(int64_t ticks);
+void thread_awake(int64_t ticks);
+void update_next_tick_to_awake(int64_t ticks);
+int64_t get_next_tick_to_awake(void);
+
+void thread_init(void);
+void thread_start(void);
+
+void thread_tick(void);
+void thread_print_stats(void);
 
 #endif /* threads/thread.h */

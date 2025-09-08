@@ -24,8 +24,13 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
+/** project1-Alarm Clock */
+static struct list sleep_list;
+static int64_t next_tick_to_awake;
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
+   
 static struct list ready_list;
 
 /* Idle thread. */
@@ -55,6 +60,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
+
+
 
 static void idle (void *aux UNUSED);
 static struct thread *next_thread_to_run (void);
@@ -92,6 +99,16 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
    It is not safe to call thread_current() until this function
    finishes. */
+
+static bool priority_more(const struct list_elem *a,
+						  const struct list_elem *b,
+						  void *aux UNUSED)
+{
+	const struct thread *ta = list_entry(a, struct thread, elem);
+	const struct thread *tb = list_entry(b, struct thread, elem);
+	return ta->priority > tb->priority;
+}
+
 void
 thread_init (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
@@ -109,6 +126,9 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	list_init(&sleep_list); /** project1-Alarm Clock */
+
+	next_tick_to_awake = INT64_MAX;
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -232,17 +252,20 @@ thread_block (void) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
-void
-thread_unblock (struct thread *t) {
+void thread_unblock(struct thread *t)
+{
 	enum intr_level old_level;
 
-	ASSERT (is_thread (t));
+	ASSERT(is_thread(t));
 
-	old_level = intr_disable ();
-	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	old_level = intr_disable();
+	ASSERT(t->status == THREAD_BLOCKED);
+	/* ready_list는 우선순위 내림차순으로 정렬 삽입 */
+	list_insert_ordered(&ready_list, &t->elem, priority_more, NULL);
 	t->status = THREAD_READY;
-	intr_set_level (old_level);
+	intr_set_level(old_level);
+
+	/* !!! 여기서 절대 thread_yield() / intr_yield_on_return() 하지 마세요 !!! */
 }
 
 /* Returns the name of the running thread. */
@@ -294,24 +317,33 @@ thread_exit (void) {
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
-void
-thread_yield (void) {
-	struct thread *curr = thread_current ();
+void thread_yield(void)
+{
+	struct thread *curr = thread_current();
 	enum intr_level old_level;
 
-	ASSERT (!intr_context ());
+	ASSERT(!intr_context());
 
-	old_level = intr_disable ();
+	old_level = intr_disable();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
-	do_schedule (THREAD_READY);
-	intr_set_level (old_level);
+		list_insert_ordered(&ready_list, &curr->elem, priority_more, NULL);
+	do_schedule(THREAD_READY);
+	intr_set_level(old_level);
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void
-thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+void thread_set_priority(int new_priority)
+{
+	thread_current()->priority = new_priority;
+
+	/* ready_list 맨 앞(최고 우선순위)과 비교해 더 높으면 양보 */
+	if (!list_empty(&ready_list))
+	{
+		struct thread *top =
+			list_entry(list_front(&ready_list), struct thread, elem);
+		if (top->priority > thread_current()->priority)
+			thread_yield();
+	}
 }
 
 /* Returns the current thread's priority. */
@@ -587,4 +619,68 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+/** project1-Alarm Clock */
+void thread_awake(int64_t wakeup_tick)
+{
+	next_tick_to_awake = INT64_MAX;
+
+	struct list_elem *sleeping;
+	sleeping = list_begin(&sleep_list); // take sleeping thread
+
+	while (sleeping != list_end(&sleep_list))
+	{ // for all sleeping threads
+		struct thread *th = list_entry(sleeping, struct thread, elem);
+
+		if (wakeup_tick >= th->wakeup_tick)
+		{
+			sleeping = list_remove(&th->elem); // delete thread
+			thread_unblock(th);				   // unblock thread
+		}
+		else
+		{
+			sleeping = list_next(sleeping);				// move to next sleeping thread
+			update_next_tick_to_awake(th->wakeup_tick); // update wakeup_tick
+		}
+	}
+}
+
+/** project1-Alarm Clock */
+void update_next_tick_to_awake(int64_t ticks)
+{
+	// find smallest tick
+	next_tick_to_awake = (next_tick_to_awake > ticks) ? ticks : next_tick_to_awake;
+}
+
+/** project1-Alarm Clock */
+int64_t
+get_next_tick_to_awake(void)
+{
+	return next_tick_to_awake;
+}
+
+/** project1-Alarm Clock */
+void thread_sleep(int64_t ticks)
+{
+	struct thread *this;
+	this = thread_current();
+
+	if (this == idle_thread) // idle -> stop
+	{
+		ASSERT(0);
+	}
+	else
+	{
+		enum intr_level old_level;
+		old_level = intr_disable(); // pause interrupt
+
+		update_next_tick_to_awake(this->wakeup_tick = ticks); // update awake ticks
+
+		list_push_back(&sleep_list, &this->elem); // push to sleep_list
+
+		thread_block(); // block this thread
+
+		intr_set_level(old_level); // continue interrupt
+	}
 }
