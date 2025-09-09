@@ -93,12 +93,6 @@ struct thread
 	char name[16];			   /* Name (for debugging purposes). */
 	int priority;			   /* Priority. */
 	int64_t wakeup_tick;	   /** project1-Alarm Clock */
-
-	int base_priority;				/* 원래(priority_set으로 설정된) 우선순위 */
-	struct list donations;			/* 나에게 우선순위를 기부한 스레드들의 리스트 */
-	struct lock *wait_on_lock;		/* 내가 지금 기다리고 있는 락 (donation chain 전파용) */
-	struct list_elem donation_elem; /* 다른 스레드의 donations 리스트에 들어갈 때 사용 */
-
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
 
@@ -162,15 +156,10 @@ void thread_start(void);
 void thread_tick(void);
 void thread_print_stats(void);
 
-void refresh_priority(void);
-void donate_priority_chain(struct thread *t);
-void remove_donations_for_lock(const struct lock *lock);
-
-bool priority_more(const struct list_elem *a,
-				   const struct list_elem *b,
-				   void *aux);
-bool donation_more(const struct list_elem *a,
-				   const struct list_elem *b,
-				   void *aux);
+/** project1-Priority Scheduling */
+void test_max_priority(void);
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+/** project1-Synchronization */
+bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
 
 #endif /* threads/thread.h */
