@@ -335,15 +335,15 @@ void thread_yield(void)
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void
-thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+void thread_set_priority(int new_priority)
+{
+	thread_current()->priority = new_priority;
 
 	/** project1-Priority Inversion Problem */
-    thread_current()->original_priority = new_priority;
+	thread_current()->original_priority = new_priority;
 
 	/** project1-Priority Inversion Problem */
-    refresh_priority();
+	refresh_priority();
 
 	/** project1-Priority Scheduling */
 	test_max_priority();
@@ -458,20 +458,21 @@ kernel_thread(thread_func *function, void *aux)
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void
-init_thread (struct thread *t, const char *name, int priority) {
-	ASSERT (t != NULL);
-	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
-	ASSERT (name != NULL);
+init_thread(struct thread *t, const char *name, int priority)
+{
+	ASSERT(t != NULL);
+	ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
+	ASSERT(name != NULL);
 
-	memset (t, 0, sizeof *t);
+	memset(t, 0, sizeof *t);
 	t->status = THREAD_BLOCKED;
-	strlcpy (t->name, name, sizeof t->name);
-	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
+	strlcpy(t->name, name, sizeof t->name);
+	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 
 	/** project1-Priority Inversion Problem */
-    t->priority = t->original_priority = priority;
-    list_init(&t->donations);
-    t->wait_lock = NULL;
+	t->priority = t->original_priority = priority;
+	list_init(&t->donations);
+	t->wait_lock = NULL;
 
 	t->magic = THREAD_MAGIC;
 }
@@ -726,54 +727,53 @@ void thread_sleep(int64_t ticks)
 }
 
 /** project1-Priority Inversion Problem */
-void 
-donate_priority() 
+void donate_priority()
 {
-    struct thread *t = thread_current();
-    int priority = t->priority;
+	struct thread *t = thread_current();
+	int priority = t->priority;
 
-    for (int depth = 0; depth < 8; depth++) 
+	for (int depth = 0; depth < 8; depth++)
 	{
-        if (t->wait_lock == NULL)
-            break;
+		if (t->wait_lock == NULL)
+			break;
 
-        t = t->wait_lock->holder;
-        t->priority = priority;
-    }
+		t = t->wait_lock->holder;
+		t->priority = priority;
+	}
 }
 
 /** project1-Priority Inversion Problem */
-void remove_with_lock(struct lock *lock) 
+void remove_with_lock(struct lock *lock)
 {
-    struct thread *t = thread_current();
-    struct list_elem *curr = list_begin(&t->donations);
-    struct thread *curr_thread = NULL;
+	struct thread *t = thread_current();
+	struct list_elem *curr = list_begin(&t->donations);
+	struct thread *curr_thread = NULL;
 
-    while (curr != list_end(&t->donations)) 
+	while (curr != list_end(&t->donations))
 	{
-        curr_thread = list_entry(curr, struct thread, donation_elem);
+		curr_thread = list_entry(curr, struct thread, donation_elem);
 
-        if (curr_thread->wait_lock == lock)
-            list_remove(&curr_thread->donation_elem);
+		if (curr_thread->wait_lock == lock)
+			list_remove(&curr_thread->donation_elem);
 
-        curr = list_next(curr);
-    }
+		curr = list_next(curr);
+	}
 }
 
 /** project1-Priority Inversion Problem */
-void refresh_priority(void) 
+void refresh_priority(void)
 {
-    struct thread *t = thread_current();
-    t->priority = t->original_priority;
+	struct thread *t = thread_current();
+	t->priority = t->original_priority;
 
-    if (list_empty(&t->donations))
-        return;
+	if (list_empty(&t->donations))
+		return;
 
-    list_sort(&t->donations, cmp_priority, NULL);
+	list_sort(&t->donations, cmp_priority, NULL);
 
-    struct list_elem *max_elem = list_front(&t->donations);
-    struct thread *max_thread = list_entry(max_elem, struct thread, donation_elem);
+	struct list_elem *max_elem = list_front(&t->donations);
+	struct thread *max_thread = list_entry(max_elem, struct thread, donation_elem);
 
-    if (t->priority < max_thread->priority)
-        t->priority = max_thread->priority;
+	if (t->priority < max_thread->priority)
+		t->priority = max_thread->priority;
 }
