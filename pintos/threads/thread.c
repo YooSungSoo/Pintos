@@ -15,6 +15,9 @@
 #include "userprog/process.h"
 #endif
 
+// ./select_test.sh -q -r
+
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -334,10 +337,16 @@ void thread_yield(void)
 	intr_set_level(old_level);
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+
+	/** project1-Priority Inversion Problem */
+	thread_current()->original_priority = new_priority;
+
+	/** project1-Priority Inversion Problem */
+	refresh_priority();
+
 	/** project1-Priority Scheduling */
 	test_max_priority();
 }
@@ -461,7 +470,12 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->status = THREAD_BLOCKED;
 	strlcpy(t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
-	t->priority = priority;
+
+	/** project1-Priority Inversion Problem */
+	t->priority = t->original_priority = priority;
+	list_init(&t->donations);
+	t->wait_lock = NULL;
+
 	t->magic = THREAD_MAGIC;
 }
 
@@ -712,4 +726,56 @@ void thread_sleep(int64_t ticks)
 
 		intr_set_level(old_level); // continue interrupt
 	}
+}
+
+/** project1-Priority Inversion Problem */
+void donate_priority()
+{
+	struct thread *t = thread_current();
+	int priority = t->priority;
+
+	for (int depth = 0; depth < 8; depth++)
+	{
+		if (t->wait_lock == NULL)
+			break;
+
+		t = t->wait_lock->holder;
+		t->priority = priority;
+	}
+}
+
+/** project1-Priority Inversion Problem */
+void remove_with_lock(struct lock *lock)
+{
+	struct thread *t = thread_current();
+	struct list_elem *curr = list_begin(&t->donations);
+	struct thread *curr_thread = NULL;
+
+	while (curr != list_end(&t->donations))
+	{
+		curr_thread = list_entry(curr, struct thread, donation_elem);
+
+		if (curr_thread->wait_lock == lock)
+			list_remove(&curr_thread->donation_elem);
+
+		curr = list_next(curr);
+	}
+}
+
+/** project1-Priority Inversion Problem */
+void refresh_priority(void)
+{
+	struct thread *t = thread_current();
+	t->priority = t->original_priority;
+
+	if (list_empty(&t->donations))
+		return;
+
+	list_sort(&t->donations, cmp_priority, NULL);
+
+	struct list_elem *max_elem = list_front(&t->donations);
+	struct thread *max_thread = list_entry(max_elem, struct thread, donation_elem);
+
+	if (t->priority < max_thread->priority)
+		t->priority = max_thread->priority;
 }
