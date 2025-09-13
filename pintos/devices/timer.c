@@ -90,19 +90,17 @@ timer_elapsed(int64_t then)
 	return timer_ticks() - then;
 }
 
-/* Suspends execution for approximately TICKS timer ticks. */
+// timer : 하드웨어 타이머 칩을 제어해서 주기적으로 인터럽트를 발생시킴
+// 여기 수정
+// 쓰레드를 ticks만큼 중지시킴
 void timer_sleep(int64_t ticks)
 {
 	int64_t start = timer_ticks();
+	ASSERT(intr_get_level() == INTR_ON); // 인터럽트 켜져있어야함
 
-	if (ticks <= 0)
-		return;
-
-	ASSERT(intr_get_level() == INTR_ON);
-	/** project1-Alarm Clock
-	while (timer_elapsed (start) < ticks)
-		thread_yield (); */
-	thread_sleep(start + ticks);
+	int64_t ticks_thread = start + ticks; // 깨울 시점
+	// printf("[AlarmClock] timer_sleep: thread will sleep until tick %lld\n", ticks_thread);
+	thread_sleep(ticks_thread); // tick_thread만큼 재우자
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -129,18 +127,29 @@ void timer_print_stats(void)
 	printf("Timer: %" PRId64 " ticks\n", timer_ticks());
 }
 
-/* Timer interrupt handler. */
-static void
-timer_interrupt(struct intr_frame *args UNUSED)
+// 여기 수정
+// 이게 CPU의 tick임 그냥 -> 인터럽트에서 깨우는것까지
+static void timer_interrupt(struct intr_frame *args UNUSED)
 {
 	ticks++;
-	thread_tick();
+	thread_tick(); // -> 현재 쓰레드의 틱 갱신하는거임
 
-	/** project1-Alarm Clock */
-	if (get_next_tick_to_awake() <= ticks)
+	if (thread_mlfqs)
 	{
-		thread_awake(ticks);
+		thread_current()->recent_cpu = add_n(thread_current()->recent_cpu, 1);
+		if (!(ticks % 4))
+		{
+			mlfqs_update_priority();
+			if (!(ticks % TIMER_FREQ))
+			{
+				mlfqs_load_avg();
+				mlfqs_update_recent_cpu();
+			}
+		}
 	}
+
+	// printf("[AlarmClock] timer_interrupt: tick %lld\n", ticks);
+	thread_awake(ticks); // 쓰레드 깨워야지
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -166,7 +175,8 @@ too_many_loops(unsigned loops)
    brief delays.
 
    Marked NO_INLINE because code alignment can significantly
-   affect timings, so that if this function was inlined
+   affect ti
+   ngs, so that if this function was inlined
    differently in different places the results would be difficult
    to predict. */
 static void NO_INLINE

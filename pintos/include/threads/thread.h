@@ -9,6 +9,10 @@
 #include "vm/vm.h"
 #endif
 
+#define NICE_DEFAULT 0
+#define RECENT_CPU_DEFAULT 0
+#define LOAD_AVG_DEFAULT 0
+
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -92,15 +96,22 @@ struct thread
 	enum thread_status status; /* Thread state. */
 	char name[16];			   /* Name (for debugging purposes). */
 	int priority;			   /* Priority. */
-	int64_t wakeup_tick;	   /** project1-Alarm Clock */
+
 	/* Shared between thread.c and synch.c. */
+	// 리스트의 노드 역할 -> 갈고리같은거임 list가  ll로 되어있으니까 여기에다가 앞뒤로 줄매세요
 	struct list_elem elem; /* List element. */
 
-	/** project1-Priority Inversion Problem */
-	int original_priority;
-	struct lock *wait_lock;
-	struct list donations;
-	struct list_elem donation_elem;
+	// 여기 추가
+	int64_t ticks_awake;				   // 일어날 시간
+	int priority_original;				   // 원래 우선순위
+	struct list lst_donation;			   // 이 쓰레드에게 기부 해준 쓰레드들 저장
+	struct list_elem lst_donation_elem;	   // 기부자들 노드
+	struct lock *lock_donated_for_waiting; // 이 쓰레드가 무슨 락을 대기하고있는지
+
+	// mlfqs
+	int nice;
+	int recent_cpu;
+	struct list_elem all_elem;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -140,8 +151,15 @@ const char *thread_name(void);
 void thread_exit(void) NO_RETURN;
 void thread_yield(void);
 
+// 여기 추가
+void thread_sleep(int64_t ticks);
+bool sort_thread_ticks(struct list_elem *a, struct list_elem *b);
+void thread_awake(int64_t ticks);
+bool sort_thread_priority(struct list_elem *a, struct list_elem *b);
+void thread_swap_prior(void);
+
 int thread_get_priority(void);
-void thread_set_priority(int);
+void thread_set_priority(int new_priority);
 
 int thread_get_nice(void);
 void thread_set_nice(int);
@@ -150,22 +168,11 @@ int thread_get_load_avg(void);
 
 void do_iret(struct intr_frame *tf);
 
-/** project1-Alarm Clock */
-void thread_sleep(int64_t ticks);
-void thread_awake(int64_t ticks);
-void update_next_tick_to_awake(int64_t ticks);
-int64_t get_next_tick_to_awake(void);
-
-void thread_init(void);
-void thread_start(void);
-
-void thread_tick(void);
-void thread_print_stats(void);
-
-/** project1-Priority Scheduling */
-void test_max_priority(void);
-bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-/** project1-Synchronization */
-bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
+// mlfqs
+void mlfqs_priority(struct thread *t);
+void mlfqs_recent_cpu(struct thread *t);
+void mlfqs_load_avg(void);
+void mlfqs_update_recent_cpu(void);
+void mlfqs_update_priority(void);
 
 #endif /* threads/thread.h */

@@ -1,6 +1,5 @@
 {
     "files.associations": {
-        "functional": "c",
-        "stdint.h": "c"
+        "intr-stubs.h": "c"
     }
 }
