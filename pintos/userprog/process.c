@@ -27,6 +27,7 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
+
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
@@ -176,8 +177,19 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+	/** project2-Command Line Parsing */
+	char *ptr, *arg;
+	int arg_cnt = 0;
+	char *arg_list[32];
+
+	for (arg = strtok_r(file_name, " ", &ptr); arg != NULL; arg = strtok_r(NULL, " ", &ptr)) // 파싱
+		arg_list[arg_cnt++] = arg; // 리스트 추가
+
 	/* And then load the binary */
 	success = load (file_name, &_if);
+
+	/** project2-Command Line Parsing */
+	argument_stack(arg_list, arg_cnt, &_if);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -189,6 +201,77 @@ process_exec (void *f_name) {
 	NOT_REACHED ();
 }
 
+/** project2-Command Line Parsing */
+// 유저 스택에 파싱된 토큰을 저장하는 함수
+void argument_stack(char **argv, int argc, struct intr_frame *if_)
+{
+	char *arg_addr[100];
+	int argv_len;
+
+	for (int i = argc - 1; i >= 0; i--)
+	{
+		argv_len = strlen(argv[i]) + 1;
+		if_->rsp -= argv_len;
+		memcpy(if_->rsp, argv[i], argv_len);
+		arg_addr[i] = if_->rsp;
+	}
+
+	while (if_->rsp % 8)
+		*(uint8_t *)(--if_->rsp) = 0;
+
+	if_->rsp -= 8;
+	memset(if_->rsp, 0, sizeof(char *));
+
+	for (int i = argc - 1; i >= 0; i--)
+	{
+		if_->rsp -= 8;
+		memcpy(if_->rsp, &arg_addr[i], sizeof(char *));
+	}
+
+	if_->rsp = if_->rsp - 8;
+	memset(if_->rsp, 0, sizeof(void *));
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + 8;
+}
+// GPT 제안 코드
+
+// void argument_stack(char **argv, int argc, struct intr_frame *if_)
+// {
+// 	char *arg_addr[100];
+
+// 	// 1. 문자열을 역순으로 복사
+// 	for (int i = argc - 1; i >= 0; i--)
+// 	{
+// 		int len = strlen(argv[i]) + 1;
+// 		if_->rsp -= len;
+// 		memcpy(if_->rsp, argv[i], len);
+// 		arg_addr[i] = if_->rsp;
+// 	}
+
+// 	// 2. 워드 얼라인
+// 	while (if_->rsp % 8 != 0)
+// 	{
+// 		if_->rsp--;
+// 		*(uint8_t *)if_->rsp = 0;
+// 	}
+
+// 	// 3. argv[argc] = NULL
+// 	if_->rsp -= 8;
+// 	*(char **)if_->rsp = NULL;
+
+// 	// 4. argv[i] 주소 push (역순)
+// 	for (int i = argc - 1; i >= 0; i--)
+// 	{
+// 		if_->rsp -= 8;
+// 		*(char **)if_->rsp = arg_addr[i];
+// 	}
+// 	char **argv_start = (char **)if_->rsp;
+
+// 	// 5. argc, argv 전달 (레지스터)
+// 	if_->R.rdi = argc;		 // 첫 번째 인자 → argc
+// 	if_->R.rsi = argv_start; // 두 번째 인자 → argv
+// }
 
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
@@ -204,6 +287,11 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+
+	/** project2-Command Line Parsing */
+	while (1) // 무한루프 추가
+	{
+	}
 	return -1;
 }
 
@@ -341,6 +429,10 @@ load (const char *file_name, struct intr_frame *if_) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
+
+	// /** project2-System Call - 파일 실행 명시 및 접근 금지 설정  */
+	// t->runn_file = file;
+	// file_deny_write(file); /** Project 2: Denying Writes to Executables */
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
