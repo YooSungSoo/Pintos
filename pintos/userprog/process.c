@@ -51,6 +51,13 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	/** Project2: for Test Case - 직접 프로그램을 실행할 때에는 이 함수를 사용하지 않지만 make check에서
+	 *  이 함수를 통해 process_create를 실행하기 때문에 이 부분을 수정해주지 않으면 Test Case의 Thread_name이
+	 *  커맨드 라인 전체로 바뀌게 되어 Pass할 수 없다.
+	 */
+	char *ptr;
+	strtok_r(file_name, " ", &ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
@@ -189,12 +196,14 @@ process_exec (void *f_name) {
 	success = load (file_name, &_if);
 
 	/** project2-Command Line Parsing */
-	argument_stack(arg_list, arg_cnt, &_if);
+	argument_stack(arg_list, arg_cnt, &_if); // 인자 넘기기
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
+
+	hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true); // 0x47480000
 
 	/* Start switched process. */
 	do_iret (&_if);
@@ -408,6 +417,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+
+ 
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
