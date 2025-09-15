@@ -1,10 +1,12 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
+#define USERPROG
 
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h" /** project2-System Call */
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -13,166 +15,134 @@
 #define RECENT_CPU_DEFAULT 0
 #define LOAD_AVG_DEFAULT 0
 
-/* States in a thread's life cycle. */
+/** project2-System Call */
+#define FDT_PAGES 3						   // File Descriptor Table을 저장할 페이지 수 (multi-oom 테스트용)
+#define FDCOUNT_LIMIT FDT_PAGES * (1 << 9) // 최대 파일 디스크립터 개수 (한 페이지 4KB / 포인터 8바이트 = 512개)
+
+/* ---- 스레드 상태(thread status) ---- */
 enum thread_status
 {
-	THREAD_RUNNING, /* Running thread. */
-	THREAD_READY,	/* Not running but ready to run. */
-	THREAD_BLOCKED, /* Waiting for an event to trigger. */
-	THREAD_DYING	/* About to be destroyed. */
+	THREAD_RUNNING, /* CPU에서 실행 중인 상태 */
+	THREAD_READY,	/* 실행 준비 완료 상태 (레디 큐에 있음) */
+	THREAD_BLOCKED, /* 이벤트를 기다리는 상태 (세마포어, 락 등) */
+	THREAD_DYING	/* 종료 중인 상태 */
 };
 
-/* Thread identifier type.
-   You can redefine this to whatever type you like. */
+/* 스레드 식별자 타입 */
 typedef int tid_t;
-#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* 실패 시 반환할 tid 값 */
 
-/* Thread priorities. */
-#define PRI_MIN 0	   /* Lowest priority. */
-#define PRI_DEFAULT 31 /* Default priority. */
-#define PRI_MAX 63	   /* Highest priority. */
+/* ---- 스레드 우선순위 ---- */
+#define PRI_MIN 0	   /* 최저 우선순위 */
+#define PRI_DEFAULT 31 /* 기본 우선순위 */
+#define PRI_MAX 63	   /* 최고 우선순위 */
 
-/* A kernel thread or user process.
- *
- * Each thread structure is stored in its own 4 kB page.  The
- * thread structure itself sits at the very bottom of the page
- * (at offset 0).  The rest of the page is reserved for the
- * thread's kernel stack, which grows downward from the top of
- * the page (at offset 4 kB).  Here's an illustration:
- *
- *      4 kB +---------------------------------+
- *           |          kernel stack           |
- *           |                |                |
- *           |                |                |
- *           |                V                |
- *           |         grows downward          |
- *           |                                 |
- *           |                                 |
- *           |                                 |
- *           |                                 |
- *           |                                 |
- *           |                                 |
- *           |                                 |
- *           |                                 |
- *           +---------------------------------+
- *           |              magic              |
- *           |            intr_frame           |
- *           |                :                |
- *           |                :                |
- *           |               name              |
- *           |              status             |
- *      0 kB +---------------------------------+
- *
- * The upshot of this is twofold:
- *
- *    1. First, `struct thread' must not be allowed to grow too
- *       big.  If it does, then there will not be enough room for
- *       the kernel stack.  Our base `struct thread' is only a
- *       few bytes in size.  It probably should stay well under 1
- *       kB.
- *
- *    2. Second, kernel stacks must not be allowed to grow too
- *       large.  If a stack overflows, it will corrupt the thread
- *       state.  Thus, kernel functions should not allocate large
- *       structures or arrays as non-static local variables.  Use
- *       dynamic allocation with malloc() or palloc_get_page()
- *       instead.
- *
- * The first symptom of either of these problems will probably be
- * an assertion failure in thread_current(), which checks that
- * the `magic' member of the running thread's `struct thread' is
- * set to THREAD_MAGIC.  Stack overflow will normally change this
- * value, triggering the assertion. */
-/* The `elem' member has a dual purpose.  It can be an element in
- * the run queue (thread.c), or it can be an element in a
- * semaphore wait list (synch.c).  It can be used these two ways
- * only because they are mutually exclusive: only a thread in the
- * ready state is on the run queue, whereas only a thread in the
- * blocked state is on a semaphore wait list. */
+/* ---- 스레드 구조체 ----
+ * 각 스레드는 고유한 커널 스택 페이지(4KB)를 갖고 있으며,
+ * struct thread는 그 페이지의 맨 아래에 저장된다.
+ * 나머지 공간은 스택으로 사용된다.
+ */
 struct thread
 {
-	/* Owned by thread.c. */
-	tid_t tid;				   /* Thread identifier. */
-	enum thread_status status; /* Thread state. */
-	char name[16];			   /* Name (for debugging purposes). */
-	int priority;			   /* Priority. */
+	/* 기본 정보 */
+	tid_t tid;				   /* 스레드 ID */
+	enum thread_status status; /* 스레드 상태 */
+	char name[16];			   /* 스레드 이름 (디버깅용) */
+	int priority;			   /* 현재 우선순위 */
 
-	/* Shared between thread.c and synch.c. */
-	// 리스트의 노드 역할 -> 갈고리같은거임 list가  ll로 되어있으니까 여기에다가 앞뒤로 줄매세요
-	struct list_elem elem; /* List element. */
+	/* 스케줄링 및 동기화용 */
+	struct list_elem elem; /* ready_list 또는 wait_list에서 사용되는 노드 */
 
-	// 여기 추가
-	int64_t ticks_awake;				   // 일어날 시간
-	int priority_original;				   // 원래 우선순위
-	struct list lst_donation;			   // 이 쓰레드에게 기부 해준 쓰레드들 저장
-	struct list_elem lst_donation_elem;	   // 기부자들 노드
-	struct lock *lock_donated_for_waiting; // 이 쓰레드가 무슨 락을 대기하고있는지
+	/* Alarm Clock 기능 (프로젝트 1) */
+	int64_t ticks_awake;				   // 깨워야 하는 시각
+	int priority_original;				   // 원래 우선순위 (priority donation 복구용)
+	struct list lst_donation;			   // 나에게 우선순위를 기부한 스레드 목록
+	struct list_elem lst_donation_elem;	   // 기부자 리스트에서 쓰일 노드
+	struct lock *lock_donated_for_waiting; // 내가 기다리는 락 (donation 적용 대상)
 
-	// mlfqs
-	int nice;
-	int recent_cpu;
-	struct list_elem all_elem;
+	/* MLFQS 관련 */
+	int nice;				   // nice 값
+	int recent_cpu;			   // recent_cpu 값
+	struct list_elem all_elem; // all_list에 들어갈 노드
 
 #ifdef USERPROG
-	/* Owned by userprog/process.c. */
-	uint64_t *pml4; /* Page map level 4 */
+	/* 유저 프로세스 관련 (프로젝트 2) */
+	uint64_t *pml4;			/* 페이지 테이블 포인터 (4레벨) */
+	int exit_status;		/* 종료 코드 */
+	int fd_idx;				/* 파일 디스크립터 인덱스 */
+	struct file **fdt;		/* 파일 디스크립터 테이블 */
+	struct file *runn_file; /* 현재 실행 중인 실행 파일 (write 금지용) */
+
+	struct intr_frame parent_if; // 부모 프로세스의 intr_frame 복제본
+	struct list child_list;		 // 자식 프로세스 리스트
+	struct list_elem child_elem; // 부모의 child_list에서 사용되는 노드
+
+	/* 프로세스 동기화 세마포어 */
+	struct semaphore fork_sema; // fork 완료 대기용
+	struct semaphore exit_sema; // 자식 프로세스 종료 대기용
+	struct semaphore wait_sema; // 부모가 wait()할 때 사용
 #endif
+
 #ifdef VM
-	/* Table for whole virtual memory owned by thread. */
+	/* 프로젝트 3: 가상 메모리 관련 */
 	struct supplemental_page_table spt;
 #endif
 
-	/* Owned by thread.c. */
-	struct intr_frame tf; /* Information for switching */
-	unsigned magic;		  /* Detects stack overflow. */
+	/* 커널 내부용 */
+	struct intr_frame tf; /* 스위칭 시 저장할 레지스터 값 */
+	unsigned magic;		  /* 스택 오버플로우 감지용 매직 넘버 */
 };
 
-/* If false (default), use round-robin scheduler.
-   If true, use multi-level feedback queue scheduler.
-   Controlled by kernel command-line option "-o mlfqs". */
+/* 스케줄러 정책 (기본: RR, 옵션: MLFQS) */
 extern bool thread_mlfqs;
 
-void thread_init(void);
-void thread_start(void);
+/* ---- 스레드 초기화 및 실행 ---- */
+void thread_init(void);	 // 스레드 서브시스템 초기화
+void thread_start(void); // 스케줄러 시작 및 idle 스레드 실행
 
-void thread_tick(void);
-void thread_print_stats(void);
+/* ---- 타이머 및 통계 ---- */
+void thread_tick(void);		   // 매 tick마다 호출 (스케줄링/통계 업데이트)
+void thread_print_stats(void); // 스케줄링 통계 출력
 
+/* ---- 스레드 생성 및 제어 ---- */
 typedef void thread_func(void *aux);
-tid_t thread_create(const char *name, int priority, thread_func *, void *);
+tid_t thread_create(const char *name, int priority, thread_func *, void *); // 새로운 스레드 생성
 
-void thread_block(void);
-void thread_unblock(struct thread *);
+void thread_block(void);			  // 현재 스레드를 BLOCKED 상태로 전환
+void thread_unblock(struct thread *); // BLOCKED → READY 상태로 전환
 
-struct thread *thread_current(void);
-tid_t thread_tid(void);
-const char *thread_name(void);
+struct thread *thread_current(void); // 현재 실행 중인 스레드 반환
+tid_t thread_tid(void);				 // 현재 스레드의 tid 반환
+const char *thread_name(void);		 // 현재 스레드 이름 반환
 
-void thread_exit(void) NO_RETURN;
-void thread_yield(void);
+void thread_exit(void) NO_RETURN; // 현재 스레드 종료
+void thread_yield(void);		  // CPU 양보 (READY 큐로 이동)
 
-// 여기 추가
-void thread_sleep(int64_t ticks);
-bool sort_thread_ticks(struct list_elem *a, struct list_elem *b);
-void thread_awake(int64_t ticks);
-bool sort_thread_priority(struct list_elem *a, struct list_elem *b);
-void thread_swap_prior(void);
+/* ---- Alarm Clock (프로젝트 1) ---- */
+void thread_sleep(int64_t ticks);									 // 현재 스레드를 지정한 tick까지 재움
+bool sort_thread_ticks(struct list_elem *a, struct list_elem *b);	 // wakeup tick 기준 정렬 비교
+void thread_awake(int64_t ticks);									 // 깨어날 시간이 된 스레드 깨우기
+bool sort_thread_priority(struct list_elem *a, struct list_elem *b); // 우선순위 기준 정렬
+void thread_swap_prior(void);										 // 실행 중 스레드와 ready_list의 우선순위 비교 후 교체
 
-int thread_get_priority(void);
-void thread_set_priority(int new_priority);
+/* ---- 우선순위 (프로젝트 1) ---- */
+int thread_get_priority(void);				// 현재 스레드의 우선순위 반환
+void thread_set_priority(int new_priority); // 현재 스레드 우선순위 변경
 
-int thread_get_nice(void);
-void thread_set_nice(int);
-int thread_get_recent_cpu(void);
-int thread_get_load_avg(void);
+/* ---- MLFQS 스케줄러 (프로젝트 1) ---- */
+int thread_get_nice(void);		 // 현재 스레드의 nice 값 반환
+void thread_set_nice(int);		 // 현재 스레드의 nice 값 설정
+int thread_get_recent_cpu(void); // 현재 스레드의 recent_cpu 반환
+int thread_get_load_avg(void);	 // 시스템 load_avg 반환
 
-void do_iret(struct intr_frame *tf);
+/* ---- 컨텍스트 스위칭 ---- */
+void do_iret(struct intr_frame *tf); // 유저 모드로 복귀 (iretq 실행)
 
-// mlfqs
-void mlfqs_priority(struct thread *t);
-void mlfqs_recent_cpu(struct thread *t);
-void mlfqs_load_avg(void);
-void mlfqs_update_recent_cpu(void);
-void mlfqs_update_priority(void);
+/* ---- MLFQS 계산 함수 ---- */
+void mlfqs_priority(struct thread *t);	 // priority 계산
+void mlfqs_recent_cpu(struct thread *t); // recent_cpu 갱신
+void mlfqs_load_avg(void);				 // load_avg 갱신
+void mlfqs_update_recent_cpu(void);		 // 전체 스레드 recent_cpu 갱신
+void mlfqs_update_priority(void);		 // 전체 스레드 priority 갱신
 
 #endif /* threads/thread.h */
