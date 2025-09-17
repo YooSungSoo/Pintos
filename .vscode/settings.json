@@ -1,6 +1,12 @@
 {
     "files.associations": {
         "intr-stubs.h": "c",
-        "flags.h": "c"
+        "flags.h": "c",
+        "palloc.h": "c",
+        "thread.h": "c",
+        "tss.h": "c",
+        "file.h": "c",
+        "filesys.h": "c",
+        "input.h": "c"
     }
 }

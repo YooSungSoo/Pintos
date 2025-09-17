@@ -16,50 +16,49 @@
 #include "userprog/process.h"
 #endif
 
-/* Random value for struct thread's `magic' member.
-   Used to detect stack overflow.  See the big comment at the top
-   of thread.h for details. */
-#define THREAD_MAGIC 0xcd6abf4b
+/* -------------------------------
+ * thread.c
+ * 스레드 생성, 실행, 종료, 스케줄링,
+ * sleep/wakeup, priority scheduling, mlfqs 처리
+ * ------------------------------- */
 
-/* Random value for basic thread
-   Do not modify this value. */
-#define THREAD_BASIC 0xd42df210
+#define THREAD_MAGIC 0xcd6abf4b // 스택 오버플로우 감지용 매직 넘버
+#define THREAD_BASIC 0xd42df210 // 기본 쓰레드 값
 
-/* List of processes in THREAD_READY state, that is, processes
-   that are ready to run but not actually running. */
+/* Ready 상태의 스레드 리스트 (실행 대기 중) */
 static struct list ready_list;
 
-/* Idle thread. */
+/* Idle thread (실행할 스레드가 없을 때 CPU 점유) */
 static struct thread *idle_thread;
 
-/* Initial thread, the thread running init.c:main(). */
+/* Pintos의 최초 스레드 (init.c의 main 실행) */
 static struct thread *initial_thread;
 
-/* Lock used by allocate_tid(). */
+/* TID 할당용 Lock */
 static struct lock tid_lock;
 
-/* Thread destruction requests */
+/* 파괴될 스레드들을 임시 저장하는 리스트 */
 static struct list destruction_req;
 
-// sleep_list 선언
+/* Sleep 상태의 스레드들을 담는 리스트 */
 static struct list sleep_list;
 
-// mlfqs
-static struct list all_list; 
+/* MLFQS 스케줄러용 전체 스레드 리스트 */
+static struct list all_list;
+
+/* 시스템 전체 load_avg 값 */
 int load_avg = 0;
 
-/* Statistics. */
-static long long idle_ticks;    /* # of timer ticks spent idle. */
-static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
-static long long user_ticks;    /* # of timer ticks in user programs. */
+/* CPU 사용 통계 */
+static long long idle_ticks;
+static long long kernel_ticks;
+static long long user_ticks;
 
-/* Scheduling. */
-#define TIME_SLICE 4            /* # of timer ticks to give each thread. */
-static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+/* 타임슬라이스 (RR scheduling 용) */
+#define TIME_SLICE 4
+static unsigned thread_ticks;
 
-/* If false (default), use round-robin scheduler.
-   If true, use multi-level feedback queue scheduler.
-   Controlled by kernel command-line option "-o mlfqs". */
+/* 스케줄링 모드 (기본: round robin, 옵션: mlfqs) */
 bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
@@ -120,7 +119,7 @@ thread_init (void) {
 	list_init (&sleep_list);
 	list_init(&all_list);
 
-	/* Set up a thread structure for the running thread. */
+	/* 현재 실행 중인 코드(main)를 스레드로 변환 */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
 
@@ -133,20 +132,17 @@ thread_init (void) {
 	initial_thread->tid = allocate_tid ();
 }
 
-/* Starts preemptive thread scheduling by enabling interrupts.
-   Also creates the idle thread. */
-void
-thread_start (void) {
-	/* Create the idle thread. */
+/* idle thread 생성 후 스케줄링 시작 */
+void thread_start(void)
+{
 	struct semaphore idle_started;
-	sema_init (&idle_started, 0);
-	thread_create ("idle", PRI_MIN, idle, &idle_started);
+	sema_init(&idle_started, 0);
 
-	/* Start preemptive thread scheduling. */
-	intr_enable ();
+	/* idle thread 생성 */
+	thread_create("idle", PRI_MIN, idle, &idle_started);
 
-	/* Wait for the idle thread to initialize idle_thread. */
-	sema_down (&idle_started);
+	intr_enable();			  // 인터럽트 허용 (스케줄링 가능 상태)
+	sema_down(&idle_started); // idle thread 초기화 완료 대기
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -222,9 +218,9 @@ tid_t thread_create (const char *name, int priority, thread_func *function, void
 	t->exit_status = 0; // exit_status 초기화
 
 	t->fd_idx = 3;
-	t->fdt[0] = 0; // stdin 예약된 자리 (dummy)
-	t->fdt[1] = 1; // stdout 예약된 자리 (dummy)
-	t->fdt[2] = 2; // stderr 예약된 자리 (dummy)
+	t->fdt[0] = NULL; // stdin 예약된 자리 (dummy)
+	t->fdt[1] = NULL; // stdout 예약된 자리 (dummy)
+	t->fdt[2] = NULL; // stderr 예약된 자리 (dummy)
 	list_push_back(&thread_current()->child_list, &t->child_elem);
 
 	#endif
@@ -243,6 +239,9 @@ tid_t thread_create (const char *name, int priority, thread_func *function, void
 	/* Add to run queue. */
 	thread_unblock (t);
 	thread_swap_prior();
+
+	// if (t->priority > thread_current()->priority)
+	// 	thread_yield();
 
 	return tid;
 }
@@ -682,6 +681,9 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->priority_original = t->priority;
 	t->nice = NICE_DEFAULT;
 	t->recent_cpu = RECENT_CPU_DEFAULT;
+
+	/** project2-System Call */
+	t->exit_status = 0;
 
 	/** project2-System Call */
 	t->runn_file = NULL;

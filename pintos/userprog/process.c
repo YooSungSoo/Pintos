@@ -3,7 +3,6 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
@@ -18,6 +17,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif

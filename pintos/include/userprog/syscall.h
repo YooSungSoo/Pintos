@@ -1,12 +1,19 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
 
+#define STDIN 0
+#define STDOUT 1
+#define STDERR 2
+
 /* ---- 시스템 콜 초기화 ---- */
 void syscall_init(void);
 // 시스템 콜 인터럽트 핸들러 등록 및 관련 자료구조 초기화
 
 /** project2-System Call */
 #include <stdbool.h>
+#include "threads/thread.h"    /* tid_t 정의 */
+#include "threads/interrupt.h" /* struct intr_frame 정의 */
+#include "userprog/process.h"
 
 /* ---- 유저 메모리 접근 검증 ---- */
 void check_address(void *addr);
@@ -54,5 +61,9 @@ int tell(int fd);
 
 void close(int fd);
 // fd에 해당하는 파일 닫기, FDT에서 제거
+
+tid_t fork(const char *thread_name);
+int exec(const char *cmd_line);
+int wait(tid_t tid);
 
 #endif /* userprog/syscall.h */
