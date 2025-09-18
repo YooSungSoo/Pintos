@@ -7,6 +7,7 @@
         "tss.h": "c",
         "file.h": "c",
         "filesys.h": "c",
-        "input.h": "c"
+        "input.h": "c",
+        "vaddr.h": "c"
     }
 }
