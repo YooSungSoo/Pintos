@@ -60,12 +60,39 @@ void syscall_init(void)
 void check_address(void *addr)
 {
 	// 잘못된 주소 접근일 경우 프로세스를 강제 종료(exit(-1))
-	//조건 1 : NULL 포인터 → 잘못된 접근
-	//조건 2 : 커널 가상 메모리 주소 → 커널 보호
-	//조건 3 : 현재 프로세스의 page table(pml4) 에 매핑되지 않은 주소 
+	// 조건 1 : NULL 포인터 → 잘못된 접근
+	// 조건 2 : 커널 가상 메모리 주소 → 커널 보호
+	// 조건 3 : 현재 프로세스의 page table(pml4) 에 매핑되지 않은 주소
 	if (is_kernel_vaddr(addr) || addr == NULL ||
 		pml4_get_page(thread_current()->pml4, addr) == NULL)
 		exit(-1);
+}
+
+static void check_user_buffer(const void *buf, unsigned size /*, bool writable_unused */)
+{
+	if (buf == NULL)
+		exit(-1);
+
+	// 시작과 끝이 유저 영역인지 빠르게 1차 확인
+	const uint8_t *start = (const uint8_t *)buf;
+	const uint8_t *end = start + size - (size ? 1 : 0);
+
+	if (size > 0)
+	{
+		if (is_kernel_vaddr(start) || is_kernel_vaddr(end))
+			exit(-1);
+	}
+
+	// 페이지 단위로 매핑 확인
+	// [pg_round_down(start) ... end]까지 한 페이지씩 확인
+	uint8_t *p = (uint8_t *)pg_round_down((void *)start);
+	for (; p <= end; p += PGSIZE)
+	{
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+		{
+			exit(-1);
+		}
+	}
 }
 
 /* The main system call interface */
@@ -193,58 +220,51 @@ int filesize(int fd)
 
 int read(int fd, void *buffer, unsigned length)
 {
-	check_address(buffer); // 유저 포인터 검증
+	// ---- 변경: 전체 버퍼 범위 검증 추가 ----
+	if (length > 0)
+		check_user_buffer(buffer, length /*, true */);
 
 	if (fd == 0)
-	{ // stdin → 키보드 입력
+	{ // stdin
 		unsigned char *buf = buffer;
 		for (unsigned i = 0; i < length; i++)
-		{
 			buf[i] = input_getc();
-		}
 		return length;
 	}
-	// 그 외의 경우
-	if (fd < 3) // stdout, stderr를 읽으려고 할 경우 & fd가 음수일 경우
-		return -1;
+	if (fd < 3)
+		return -1; // stdout/stderr/read 금지
 
 	struct file *file = process_get_file(fd);
-	off_t bytes = -1;
-
-	if (file == NULL) // 파일이 비어있을 경우
+	if (file == NULL)
 		return -1;
 
 	lock_acquire(&filesys_lock);
-	bytes = file_read(file, buffer, length);
+	off_t bytes = file_read(file, buffer, length);
 	lock_release(&filesys_lock);
-
 	return bytes;
 }
 
 int write(int fd, const void *buffer, unsigned length)
 {
-	check_address(buffer);
+	// ---- 변경: 읽기용 범위 검증(매핑 유효성) ----
+	if (length > 0)
+		check_user_buffer(buffer, length /*, false */);
 
-	off_t bytes = -1;
-
-	if (fd <= 0) // stdin에 쓰려고 할 경우 & fd 음수일 경우
+	if (fd <= 0)
 		return -1;
-
 	if (fd < 3)
-	{ // 1(stdout) * 2(stderr) -> console로 출력
+	{
 		putbuf(buffer, length);
 		return length;
 	}
 
 	struct file *file = process_get_file(fd);
-
 	if (file == NULL)
 		return -1;
 
 	lock_acquire(&filesys_lock);
-	bytes = file_write(file, buffer, length);
+	off_t bytes = file_write(file, buffer, length);
 	lock_release(&filesys_lock);
-
 	return bytes;
 }
 

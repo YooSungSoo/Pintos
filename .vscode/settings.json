@@ -8,6 +8,11 @@
         "file.h": "c",
         "filesys.h": "c",
         "input.h": "c",
-        "vaddr.h": "c"
+        "vaddr.h": "c",
+        "loader.h": "c",
+        "inttypes.h": "c",
+        "interrupt.h": "c",
+        "exception.h": "c",
+        "numbers": "c"
     }
 }
